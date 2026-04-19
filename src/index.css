@@ -1,0 +1,124 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Inter:wght@400;500;600&family=Be+Vietnam+Pro:wght@400;500;700&family=Lexend:wght@400;600;800&display=swap');
+@import "tailwindcss";
+@import "katex/dist/katex.min.css";
+
+@theme {
+  --font-sans: "Inter", "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Poppins", sans-serif;
+  --font-kids: "Lexend", sans-serif;
+  
+  --color-primary: #E85D75;
+  --color-secondary: #4ECDC4;
+  --color-cream: #FFFDF9;
+  --color-accent: #B39DDB;
+  
+  /* Kids Theme */
+  --color-kids-orange: #FF9F1C;
+  --color-kids-blue: #2EC4B6;
+  
+  /* Professional Theme */
+  --color-pro-green: #2D6A4F;
+  --color-pro-white: #F8F9FA;
+  
+  /* Elderly Theme */
+  --color-elderly-bg: #FFF9E6;
+  --color-elderly-text: #1A1A1A;
+  --color-elderly-accent: #FFA000;
+}
+
+@layer base {
+  body {
+    @apply bg-cream text-gray-800 font-sans transition-colors duration-500;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
+  }
+}
+
+/* --- High Contrast Mode --- */
+.high-contrast {
+  --color-elderly-bg: #000000;
+  --color-elderly-text: #FFD700;
+  --color-elderly-accent: #FFFFFF;
+}
+
+/* Elderly Mode Overrides */
+.theme-elderly {
+  font-size: 1.5rem; /* Base font size increase per PDF (150%) */
+  background-color: var(--color-elderly-bg);
+  color: var(--color-elderly-text);
+  @apply selection:bg-elderly-accent;
+}
+
+.theme-elderly h1 { font-size: 3.5rem; font-weight: 900; }
+.theme-elderly h2 { font-size: 2.8rem; font-weight: 800; }
+
+.theme-elderly .btn-huge {
+  @apply w-full min-h-[120px] flex flex-col items-center justify-center gap-6 p-10 rounded-[48px] border-8 border-gray-900 text-3xl font-black shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] transition-transform active:scale-95 active:shadow-none bg-white text-gray-900;
+}
+
+/* 3D "Physical" Button Style */
+.btn-3d {
+  @apply relative translate-y-[-4px] border-b-[8px] border-black active:translate-y-[0px] active:border-b-0;
+}
+
+/* Kids Mode Overrides */
+.theme-kids {
+  font-family: var(--font-kids);
+  background-color: #FFF;
+}
+
+.theme-kids .card-bouncy {
+  @apply rounded-[32px] border-4 border-kids-orange shadow-[8px_8px_0px_0px_#FF9F1C] hover:translate-x-[-4px] hover:translate-y-[-4px] hover:shadow-[12px_12px_0px_0px_#FF9F1C] transition-all;
+}
+
+.gradient-primary {
+  background: linear-gradient(135deg, #E85D75 0%, #FF8E9E 100%);
+}
+
+.gradient-kids {
+  background: linear-gradient(135deg, #FF9F1C 0%, #FFBF69 100%);
+}
+
+.glass-card {
+  @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-xl;
+}
+
+/* Voice Assistant Pulse */
+.voice-pulse {
+  @apply relative flex items-center justify-center;
+}
+
+.voice-pulse::before {
+  content: '';
+  @apply absolute w-full h-full bg-primary/30 rounded-full animate-ping;
+}
+
+/* --- Markdown Styles --- */
+.markdown-body {
+  @apply text-sm leading-relaxed;
+}
+.markdown-body p {
+  @apply mb-2 last:mb-0;
+}
+.markdown-body ul, .markdown-body ol {
+  @apply ml-4 mb-2;
+}
+.markdown-body ul {
+  @apply list-disc;
+}
+.markdown-body ol {
+  @apply list-decimal;
+}
+.markdown-body strong {
+  @apply font-black;
+}
+.markdown-body italic {
+  @apply italic;
+}
+.markdown-body code {
+  @apply bg-gray-100 px-1 rounded font-mono text-xs;
+}
+.markdown-body .katex-display {
+  @apply my-2 overflow-x-auto overflow-y-hidden py-1;
+}

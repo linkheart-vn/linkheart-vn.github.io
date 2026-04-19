@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Primitives ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+    
+    function isOwner(userId) {
+      return isVerified() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- Entity Validations ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid == request.auth.uid &&
+             data.email is string && data.email.size() <= 100;
+    }
+
+    // --- Rules ---
+
+    // User Profiles and Private Subcollections
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isVerified() && request.auth.uid == userId && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming()) && 
+                    incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'walletBalance', 'rating', 'totalTrips', 'pin', 'failedAttempts', 'lockoutUntil', 'preferredMode']);
+
+      match /{allSubcollections=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Public Help Requests
+    match /helpRequests/{requestId} {
+      allow read: if isVerified();
+      
+      allow create: if isVerified() && 
+                    isValidId(requestId) &&
+                    request.resource.data.keys().hasAll(['userId', 'userName', 'service', 'status', 'createdAt']) &&
+                    request.resource.data.userId == request.auth.uid &&
+                    request.resource.data.status == 'open' &&
+                    request.resource.data.createdAt == request.time;
+      
+      allow update: if isVerified() && 
+                    isValidId(requestId) &&
+                    request.resource.data.keys().hasAll(['userId', 'userName', 'service', 'status', 'createdAt']) && (
+                      // Action 1: Owner updates
+                      (request.resource.data.userId == request.auth.uid && 
+                       resource.data.userId == request.auth.uid &&
+                       request.resource.data.createdAt == resource.data.createdAt) ||
+                      
+                      // Action 2: Helper matches
+                      (resource.data.status == 'open' && 
+                       request.resource.data.status == 'matched' && 
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
+                    );
+      
+      allow delete: if isVerified() && 
+                    isValidId(requestId) &&
+                    existing().userId == request.auth.uid;
+    }
+
+    // Companions (Demo Logic)
+    match /companions/{companionId} {
+      allow read: if isVerified();
+      allow write: if isVerified(); // Restricted for demo
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "Remix: Remix: LinkHeart - Multi-Generational Companion Platform",
+  "description": "A multi-generational companion platform with 3 adaptive interfaces: Kids, Adults, and Seniors.",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone",
+    "camera"
+  ]
+}
