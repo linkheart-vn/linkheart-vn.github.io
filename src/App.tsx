@@ -55,7 +55,7 @@ import {
   RotateCcw
 } from "lucide-react";
 import React, { useState, useEffect, useRef } from "react";
-import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signOut, User as FirebaseUser } from "firebase/auth";
 import { 
@@ -142,15 +142,17 @@ const getLinkyAIResponse = async (userPrompt: string, systemContext: string) => 
   for (let i = 0; i < geminiKeys.length; i++) {
     const currentKey = geminiKeys[i];
     try {
-      const genAI = new GoogleGenerativeAI(currentKey);
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
-        systemInstruction: systemContext + "\n\nAn toàn: Luôn tích cực, ấm áp. Không thảo luận chủ đề gây hại."
+      const ai = new GoogleGenAI({ apiKey: currentKey });
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: userPrompt,
+        config: {
+          systemInstruction: systemContext + "\n\nAn toàn: Luôn tích cực, ấm áp. Không thảo luận chủ đề gây hại."
+        }
       });
       
-      const result = await model.generateContent(userPrompt);
-      const response = await result.response;
-      const aiText = response.text() || "Linky chưa nghĩ ra câu trả lời.";
+      const aiText = response.text || "Linky chưa nghĩ ra câu trả lời.";
       return aiText + (i > 0 ? ` (Dự phòng Gemini ${i + 1})` : "");
     } catch (error: any) {
       console.warn(`Gemini Key ${i + 1} gặp lỗi:`, error.message || error);
