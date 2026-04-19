@@ -1,24 +1,28 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // 0. Global Safety Net
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // --- Helper Primitives ---
-    
     function isSignedIn() {
       return request.auth != null;
     }
-    
+
     function isVerified() {
       return isSignedIn() && request.auth.token.email_verified == true;
     }
-    
+
     function isOwner(userId) {
       return isVerified() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerified() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -29,66 +33,72 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    // --- Entity Validations ---
-
-    function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'email']) &&
-             data.uid == request.auth.uid &&
-             data.email is string && data.email.size() <= 100;
-    }
-
-    // --- Rules ---
-
-    // User Profiles and Private Subcollections
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow create: if isVerified() && request.auth.uid == userId && isValidUser(incoming());
-      allow update: if isOwner(userId) && isValidUser(incoming()) && 
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && 
+                    incoming().keys().hasAll(['uid', 'email']) &&
+                    incoming().uid == userId;
+      allow update: if (isOwner(userId) || isAdmin()) && 
                     incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'walletBalance', 'rating', 'totalTrips', 'pin', 'failedAttempts', 'lockoutUntil', 'preferredMode']);
 
-      match /{allSubcollections=**} {
-        allow read, write: if isOwner(userId);
+      match /requests/{requestId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId) || isAdmin();
+      }
+      match /status/elderly {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId) || isAdmin();
+      }
+      match /reminders/{reminderId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+      match /memories/{memoryId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+      match /transactions/{transactionId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) || isAdmin();
+      }
+      match /logs/{logId} {
+        allow read, create: if isOwner(userId) || isAdmin();
+      }
+      match /appointments/{appointmentId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+      match /acceptedHelp/{helpId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+      match /reviews/{reviewId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) || isAdmin();
       }
     }
 
-    // Public Help Requests
     match /helpRequests/{requestId} {
-      allow read: if isVerified();
+      allow list: if isVerified() && resource.data.status == 'open';
+      allow get: if isVerified();
       
       allow create: if isVerified() && 
                     isValidId(requestId) &&
-                    request.resource.data.keys().hasAll(['userId', 'userName', 'service', 'status', 'createdAt']) &&
-                    request.resource.data.userId == request.auth.uid &&
-                    request.resource.data.status == 'open' &&
-                    request.resource.data.createdAt == request.time;
+                    incoming().keys().hasAll(['userId', 'userName', 'service', 'status', 'createdAt']) &&
+                    incoming().userId == request.auth.uid &&
+                    incoming().status == 'open' &&
+                    incoming().createdAt == request.time;
       
-      allow update: if isVerified() && 
-                    isValidId(requestId) &&
-                    request.resource.data.keys().hasAll(['userId', 'userName', 'service', 'status', 'createdAt']) && (
-                      // Action 1: Owner updates
-                      (request.resource.data.userId == request.auth.uid && 
-                       resource.data.userId == request.auth.uid &&
-                       request.resource.data.createdAt == resource.data.createdAt) ||
-                      
-                      // Action 2: Helper matches
-                      (resource.data.status == 'open' && 
-                       request.resource.data.status == 'matched' && 
-                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
+      allow update: if isVerified() && (
+                      (existing().userId == request.auth.uid && incoming().userId == request.auth.uid) ||
+                      (existing().status == 'open' && 
+                       incoming().status == 'matched' && 
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status'])) ||
+                      isAdmin()
                     );
       
-      allow delete: if isVerified() && 
-                    isValidId(requestId) &&
-                    existing().userId == request.auth.uid;
+      allow delete: if (existing().userId == request.auth.uid) || isAdmin();
     }
 
-    // Companions (Demo Logic)
     match /companions/{companionId} {
       allow read: if isVerified();
-      allow write: if isVerified(); // Restricted for demo
+      allow write: if isAdmin();
     }
   }
 }

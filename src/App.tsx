@@ -61,6 +61,7 @@ import { onAuthStateChanged, signOut, User as FirebaseUser } from "firebase/auth
 import { 
   doc, 
   getDoc, 
+  getDocFromServer,
   collection, 
   getDocs, 
   query, 
@@ -73,6 +74,22 @@ import {
   serverTimestamp,
   deleteDoc
 } from "firebase/firestore";
+
+// --- Validate Connection to Firestore (Per Critical Constraint) ---
+async function testFirestoreConnection() {
+  try {
+    // Testing connection without crashing if rules deny it (expected)
+    await getDocFromServer(doc(db, 'test', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration: The client is offline.");
+    } else {
+      console.log("Firestore connection test completed (Rules may have restricted access, which is normal).");
+    }
+  }
+}
+testFirestoreConnection();
+// ------------------------------------------------------------------
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
