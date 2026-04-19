@@ -55,7 +55,7 @@ import {
   RotateCcw
 } from "lucide-react";
 import React, { useState, useEffect, useRef } from "react";
-import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signOut, User as FirebaseUser } from "firebase/auth";
 import { 
@@ -100,25 +100,27 @@ import Auth from "./components/Auth";
 // --- Global Utilities for Linky AI ---
 const getAllAvailableKeys = (type: 'gemini' | 'openai'): string[] => {
   const keys: string[] = [];
-  const env = typeof process !== 'undefined' ? process.env : {} as any;
+  const env = (import.meta as any).env || {};
+  const procEnv = typeof process !== 'undefined' ? process.env : {} as any;
   
   if (type === 'gemini') {
-    const k1 = env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY;
-    const k2 = env.GEMINI_API_KEY_2 || (import.meta as any).env?.VITE_GEMINI_API_KEY_2;
-    const k3 = env.GEMINI_API_KEY_3 || (import.meta as any).env?.VITE_GEMINI_API_KEY_3;
-    if (k1 && k1 !== 'undefined') keys.push(k1.trim());
-    if (k2 && k2 !== 'undefined') keys.push(k2.trim());
-    if (k3 && k3 !== 'undefined') keys.push(k3.trim());
-  } else {
-    const k1 = env.OPENAI_API_KEY || (import.meta as any).env?.VITE_OPENAI_API_KEY;
-    const k2 = env.OPENAI_API_KEY_2 || (import.meta as any).env?.VITE_OPENAI_API_KEY_2;
-    const k3 = env.OPENAI_API_KEY_3 || (import.meta as any).env?.VITE_OPENAI_API_KEY_3;
-    if (k1 && k1 !== 'undefined') keys.push(k1.trim());
-    if (k2 && k2 !== 'undefined') keys.push(k2.trim());
-    if (k3 && k3 !== 'undefined') keys.push(k3.trim());
+    // Thử đến 5 Key Gemini
+    const keyVars = [
+      procEnv.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY,
+      procEnv.GEMINI_API_KEY_2 || env.VITE_GEMINI_API_KEY_2,
+      procEnv.GEMINI_API_KEY_3 || env.VITE_GEMINI_API_KEY_3,
+      procEnv.GEMINI_API_KEY_4 || env.VITE_GEMINI_API_KEY_4,
+      procEnv.GEMINI_API_KEY_5 || env.VITE_GEMINI_API_KEY_5,
+    ];
+    
+    keyVars.forEach(k => {
+      if (k && k !== 'undefined' && k !== '""' && k.length > 5) {
+        keys.push(k.trim());
+      }
+    });
   }
   
-  return keys.filter(k => k.length > 5); // Simple validation
+  return keys;
 };
 
 const getApiKey = (type: 'gemini' | 'openai' = 'gemini'): string => {
@@ -126,82 +128,47 @@ const getApiKey = (type: 'gemini' | 'openai' = 'gemini'): string => {
   return all[0] || "";
 };
 
-// --- OpenAI Integration ---
-import OpenAI from "openai";
-
-const getOpenAIResponse = async (userPrompt: string, systemContext: string, specificKey?: string) => {
-  const apiKey = specificKey || getApiKey('openai');
-  if (!apiKey) throw new Error("OPENAI_API_KEY_MISSING");
-
-  try {
-    const openai = new OpenAI({
-      apiKey: apiKey,
-      dangerouslyAllowBrowser: true 
-    });
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemContext },
-        { role: "user", content: userPrompt }
-      ],
-      temperature: 0.7,
-    });
-
-    return response.choices[0].message?.content || "ChatGPT không trả lời được.";
-  } catch (error: any) {
-    console.error("OpenAI Error:", error);
-    throw error;
-  }
-};
-// -------------------------
-
+// --- Linky AI Response Logic (Gemini Exclusive) ---
 const getLinkyAIResponse = async (userPrompt: string, systemContext: string) => {
   const geminiKeys = getAllAvailableKeys('gemini');
-  const openaiKeys = getAllAvailableKeys('openai');
+  
+  console.log(`[LinkyAI] Đang kiểm tra cấu hình: Gemini Keys (${geminiKeys.length})`);
 
-  // 1. Thử danh sách Gemini theo thứ tự
+  if (geminiKeys.length === 0) {
+    return "⚠️ Linky AI chưa được kết nối! Hãy cấu hình ít nhất một VITE_GEMINI_API_KEY trong GitHub Secrets nhé.";
+  }
+
+  // Thử danh sách Gemini theo thứ tự
   for (let i = 0; i < geminiKeys.length; i++) {
     const currentKey = geminiKeys[i];
     try {
-      const ai = new GoogleGenAI({ apiKey: currentKey });
-      const response = await (ai as any).models.generateContent({
-        model: "gemini-1.5-flash", 
-        config: {
-          systemInstruction: systemContext + "\n\nAn toàn: Luôn tích cực, ấm áp. Không thảo luận chủ đề gây hại.",
-        },
-        contents: [{ role: 'user', parts: [{ text: userPrompt }] }]
+      const genAI = new GoogleGenerativeAI(currentKey);
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-flash",
+        systemInstruction: systemContext + "\n\nAn toàn: Luôn tích cực, ấm áp. Không thảo luận chủ đề gây hại."
       });
-      const aiText = response.text || "Linky chưa nghĩ ra câu trả lời.";
-      return aiText + (i > 0 ? ` (Dự phòng ${i})` : "");
+      
+      const result = await model.generateContent(userPrompt);
+      const response = await result.response;
+      const aiText = response.text() || "Linky chưa nghĩ ra câu trả lời.";
+      return aiText + (i > 0 ? ` (Dự phòng Gemini ${i + 1})` : "");
     } catch (error: any) {
-      console.warn(`Gemini Key ${i + 1} gặp lỗi, đang thử Key tiếp theo...`, error);
-      // Nếu là lỗi Quota/Key không hợp lệ, tiếp tục Loop
-      // Nếu là Key cuối cùng của Gemini, mới chuyển sang OpenAI
-      if (i === geminiKeys.length - 1 && openaiKeys.length === 0) {
-        if (error.message?.includes("API key not valid")) {
-          return "Lỗi: Tất cả API Key Gemini đều không hợp lệ. Vui lòng kiểm tra lại cấu hình.";
+      console.warn(`Gemini Key ${i + 1} gặp lỗi:`, error.message || error);
+      
+      // Nếu là Key cuối cùng thì mới báo lỗi tổng thể
+      if (i === geminiKeys.length - 1) {
+        if (error.status === 401 || error.message?.includes("not valid")) {
+          return "⚠️ Lỗi: Tất cả API Key Gemini đều không hợp lệ. Vui lòng kiểm tra lại GitHub Secrets.";
         }
-        throw error;
+        if (error.status === 429 || error.message?.includes("quota")) {
+          return "⚠️ Lỗi: Tất cả các Key Gemini đều đã hết hạn mức (Quota). Vui lòng đổi Key hoặc đợi ngày mai!";
+        }
+        return `⚠️ Lỗi hệ thống: ${error.message || "Linky gặp sự cố bất ngờ."}`;
       }
     }
   }
 
-  // 2. Thử danh sách OpenAI nếu Gemini thất bại hoặc không có Key
-  for (let i = 0; i < openaiKeys.length; i++) {
-    const currentKey = openaiKeys[i];
-    try {
-      // Chúng ta cần truyền key vào getOpenAIResponse (cần sửa hàm này)
-      const aiText = await getOpenAIResponse(userPrompt, systemContext, currentKey);
-      return aiText + ` (ChatGPT Backup ${i + 1})`;
-    } catch (error: any) {
-      console.error(`OpenAI Key ${i + 1} thất bại.`, error);
-      if (i === openaiKeys.length - 1) throw error;
-    }
-  }
-
-  return "⚠️ Linky AI chưa được thiết lập bất kỳ khóa (API Key) nào. " +
-         "\n\nHãy thêm VITE_GEMINI_API_KEY hoặc VITE_OPENAI_API_KEY (có thể thêm _2, _3 để dự phòng) nhé!";
+  return "⚠️ Không thể kết nối với Linky AI.";
 };
 
 (window as any).getLinkyAIResponse = getLinkyAIResponse;
@@ -613,7 +580,12 @@ const LinkyAI = ({ user }: { user: FirebaseUser | null }) => {
       setMessages(prev => [...prev, { role: 'ai', text: aiText }]);
       speak(aiText);
     } catch (error: any) {
-      setMessages(prev => [...prev, { role: 'ai', text: "Linky đang bận một chút, bạn chờ mình giây lát nhé!" }]);
+      console.error("LinkyAI Fatal Error:", error);
+      let errMsg = "Linky đang bận một chút, bạn chờ mình giây lát nhé!";
+      if (error.message?.includes("quota") || error.status === 429) {
+        errMsg = "⚠️ Linky đang bị quá tải (Hết hạn mức API). Vui lòng kiểm tra lại số dư tài khoản của bạn.";
+      }
+      setMessages(prev => [...prev, { role: 'ai', text: errMsg }]);
     } finally {
       setIsTyping(false);
     }
