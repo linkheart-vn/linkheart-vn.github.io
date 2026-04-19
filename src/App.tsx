@@ -120,11 +120,17 @@ const speak = (text: string) => {
 };
 
 const getApiKey = (type: 'gemini' | 'openai' = 'gemini'): string => {
-  // In Vite/AI Studio, these are handled by the define property in vite.config.ts
-  // which maps them from environment variables during build.
-  if (type === 'gemini') return typeof process !== 'undefined' ? process.env.GEMINI_API_KEY || "" : "";
-  if (type === 'openai') return typeof process !== 'undefined' ? process.env.OPENAI_API_KEY || "" : "";
-  return "";
+  // Resilience: Check multiple possible locations for the key
+  let key = "";
+  if (type === 'gemini') {
+    key = (import.meta as any).env?.VITE_GEMINI_API_KEY || 
+          (typeof process !== 'undefined' ? (process.env?.GEMINI_API_KEY || (process.env as any)?.VITE_GEMINI_API_KEY) : "");
+  } else {
+    key = (import.meta as any).env?.VITE_OPENAI_API_KEY || 
+          (typeof process !== 'undefined' ? (process.env?.OPENAI_API_KEY || (process.env as any)?.VITE_OPENAI_API_KEY) : "");
+  }
+  
+  return (key && key !== 'undefined') ? key.trim() : "";
 };
 
 // --- OpenAI Integration ---
@@ -161,14 +167,14 @@ const getLinkyAIResponse = async (userPrompt: string, systemContext: string) => 
   const geminiApiKey = getApiKey('gemini');
   const openaiApiKey = getApiKey('openai');
 
-  // 1. Try Gemini first (Preferred in AI Studio)
+  // 1. Thử dùng Gemini trước (Ưu tiên vì tiết kiệm và tích hợp tốt)
   if (geminiApiKey) {
     try {
       const ai = new GoogleGenAI({ apiKey: geminiApiKey });
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview", 
         config: {
-          systemInstruction: systemContext + "\n\nSafety: Always positive and warm. Do not discuss harmful topics.",
+          systemInstruction: systemContext + "\n\nAn toàn: Luôn tích cực, ấm áp. Không thảo luận chủ đề gây hại.",
         },
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }]
       });
@@ -177,12 +183,17 @@ const getLinkyAIResponse = async (userPrompt: string, systemContext: string) => 
       speak(speechText);
       return aiText;
     } catch (error: any) {
-      console.warn("Gemini failed, trying OpenAI backup...", error);
-      if (!openaiApiKey) throw error; 
+      console.warn("Gemini gặp lỗi, đang thử chuyển sang ChatGPT dự phòng...", error);
+      if (!openaiApiKey) {
+        if (error.message?.includes("API key not valid")) {
+          return "Lỗi: API Key Gemini không hợp lệ. Vui lòng kiểm tra lại cấu hình.";
+        }
+        throw error;
+      }
     }
   }
 
-  // 2. Try OpenAI as backup
+  // 2. Thử dùng OpenAI làm Backup
   if (openaiApiKey) {
     try {
       const aiText = await getOpenAIResponse(userPrompt, systemContext);
@@ -190,12 +201,15 @@ const getLinkyAIResponse = async (userPrompt: string, systemContext: string) => 
       speak(speechText);
       return aiText + " (Hỗ trợ từ ChatGPT)";
     } catch (error: any) {
-      console.error("Both AI providers failed.", error);
+      console.error("Cả 2 dịch vụ AI đều thất bại.", error);
       throw error;
     }
   }
 
-  return "API Key chưa được thiết lập. Nếu dùng AI Studio, hãy thêm vào menu Settings -> API Keys. Nếu deploy GitHub/Local, hãy dùng tiền tố VITE_ (ví dụ: VITE_GEMINI_API_KEY).";
+  return "⚠️ Linky AI chưa được thiết lập khóa (API Key). " +
+         "\n\n- Nếu bạn đang dùng AI Studio: Vào menu 'Settings' -> chọn 'API Keys' để thêm." +
+         "\n\n- Nếu bạn đưa lên GitHub: Hãy thêm Secret tên là VITE_GEMINI_API_KEY hoặc VITE_OPENAI_API_KEY." +
+         "\n\nHãy nhờ người hỗ trợ kỹ thuật kiểm tra nếu bạn không rõ phần này nhé!";
 };
 
 (window as any).getLinkyAIResponse = getLinkyAIResponse;
