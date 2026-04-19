@@ -386,10 +386,13 @@ const Portal = ({ onSelect }: { onSelect: (type: UserType) => void }) => {
     </div>
   );
 };
-// --- LinkyAI Persistent Assistant Component ---
+
+// --- LinkyAI Assistant Component ---
 const LinkyAI = ({ user }: { user: FirebaseUser | null }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isImmersive, setIsImmersive] = useState(false);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [messages, setMessages] = useState<{ role: 'user' | 'ai', text: string }[]>([
     { 
       role: 'ai', 
@@ -400,61 +403,111 @@ const LinkyAI = ({ user }: { user: FirebaseUser | null }) => {
   ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
   const [isListening, setIsListening] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const synthesisRef = useRef<SpeechSynthesis | null>(null);
+  const synthesisRef = useRef<SpeechSynthesis | null>(window.speechSynthesis);
+  const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
 
+  // Asynchronous voice loading for Desktop browsers
   useEffect(() => {
-    synthesisRef.current = window.speechSynthesis;
+    const loadVoices = () => {
+      if (synthesisRef.current) {
+        const availableVoices = synthesisRef.current.getVoices();
+        if (availableVoices.length > 0) {
+          voicesRef.current = availableVoices;
+        }
+      }
+    };
+
+    loadVoices();
+    if (synthesisRef.current && synthesisRef.current.onvoiceschanged !== undefined) {
+      synthesisRef.current.onvoiceschanged = loadVoices;
+    }
   }, []);
 
-  // Giọng nói Linky
+  // Ngăn chặn rò rỉ bộ nhớ hoặc lỗi trình duyệt khi xử lý giọng nói
+  const currentUtterances = useRef<SpeechSynthesisUtterance[]>([]);
+
   const speak = (text: string) => {
     if (!synthesisRef.current || !isVoiceEnabled) return;
+
+    // Dừng tất cả và dọn dẹp hàng đợi cũ
     synthesisRef.current.cancel();
+    currentUtterances.current = [];
     
-    // Xóa markdown và làm sạch văn bản
     const cleanText = text.replace(/[*#_`]/g, '').replace(/\(.*?\)/g, '').replace(/\s+/g, ' ').trim();
     if (!cleanText) return;
-    
-    // Chia văn bản thành các câu nhỏ để tránh treo trình duyệt (limit 160 chars)
+
+    // Tách văn bản thành các đoạn nhỏ để ổn định hơn trên Chrome/Edge
     const chunks = cleanText.match(/[^.!?]+[.!?]+|\s*[^.!?]+$/g) || [cleanText];
     let chunkIndex = 0;
 
     const processNextChunk = () => {
-      if (chunkIndex >= chunks.length) {
+      if (chunkIndex >= chunks.length || !synthesisRef.current) {
         setIsSpeaking(false);
+        currentUtterances.current = [];
         return;
       }
 
-      const utterance = new SpeechSynthesisUtterance(chunks[chunkIndex].trim());
-      const voices = synthesisRef.current?.getVoices() || [];
-      const viVoice = voices.find(v => v.lang.startsWith('vi')) || voices.find(v => v.name.includes('Vietnamese'));
-      
-      if (viVoice) utterance.voice = viVoice;
-      utterance.lang = 'vi-VN';
-      utterance.rate = 1.05;
-      utterance.pitch = 1.0;
+      try {
+        const utterance = new SpeechSynthesisUtterance(chunks[chunkIndex].trim());
+        
+        // Lưu reference để tránh Garbage Collection xóa mất khi đang nói (Lỗi Chrome)
+        currentUtterances.current.push(utterance);
 
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => {
-        chunkIndex++;
-        processNextChunk();
-      };
-      utterance.onerror = () => {
+        const viVoice = voicesRef.current.find(v => v.lang.includes('vi') || v.name.includes('Vietnamese')) || 
+                        voicesRef.current.find(v => v.name.includes('Google') && v.lang.includes('vi'));
+        
+        if (viVoice) {
+          utterance.voice = viVoice;
+          utterance.lang = viVoice.lang;
+        } else {
+          utterance.lang = 'vi-VN';
+        }
+
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        utterance.onstart = () => setIsSpeaking(true);
+        utterance.onend = () => {
+          chunkIndex++;
+          processNextChunk();
+        };
+        
+        utterance.onerror = (event: any) => {
+          // 'interrupted'/'canceled' thường xảy ra khi ta nhấn nút Chat mới hoặc dừng thủ công
+          if (event.error !== 'interrupted' && event.error !== 'canceled') {
+            console.error("Linky Speech Detail Error:", event.error, event);
+          }
+          
+          if (event.error === 'not-allowed') {
+            console.warn("Trình duyệt chặn âm thanh. Cần click vào trang để kích hoạt.");
+          }
+
+          setIsSpeaking(false);
+          // Thử đoạn tiếp theo sau 200ms nếu không phải lỗi bị ngắt thủ công
+          if (event.error !== 'interrupted' && event.error !== 'canceled') {
+            chunkIndex++;
+            setTimeout(processNextChunk, 200);
+          }
+        };
+
+        // Một thủ thuật cho Chrome: Nếu hàng đợi bị kẹt, resume nó
+        if (synthesisRef.current.paused) {
+          synthesisRef.current.resume();
+        }
+
+        synthesisRef.current.speak(utterance);
+      } catch (err) {
+        console.error("Critical Speech Exception:", err);
         setIsSpeaking(false);
-        // Fallback: try next chunk anyway
-        chunkIndex++;
-        processNextChunk();
-      };
-
-      synthesisRef.current?.speak(utterance);
+      }
     };
 
-    processNextChunk();
+    // Tạo độ trễ nhỏ sau khi cancel() để trình duyệt kịp giải phóng tài nguyên
+    setTimeout(processNextChunk, 50);
   };
 
   const stopSpeaking = () => {
@@ -462,7 +515,6 @@ const LinkyAI = ({ user }: { user: FirebaseUser | null }) => {
     setIsSpeaking(false);
   };
 
-  // Khởi động hệ thống giọng nói khi người dùng tương tác lần đầu
   useEffect(() => {
     const handleAskLinky = (e: any) => {
       const text = e.detail;
@@ -477,19 +529,13 @@ const LinkyAI = ({ user }: { user: FirebaseUser | null }) => {
     const unlockAudio = () => {
       if (synthesisRef.current) {
         const u = new SpeechSynthesisUtterance("");
+        u.volume = 0;
         synthesisRef.current.speak(u);
       }
       window.removeEventListener('click', unlockAudio);
     };
     window.addEventListener('click', unlockAudio);
     
-    const loadVoices = () => synthesisRef.current?.getVoices();
-    if (synthesisRef.current) {
-      synthesisRef.current.addEventListener('voiceschanged', loadVoices);
-      loadVoices();
-    }
-    
-    // Khởi tạo Speech Recognition
     if (typeof window !== 'undefined' && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
       const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
       recognitionRef.current = new SpeechRecognition();
@@ -510,9 +556,6 @@ const LinkyAI = ({ user }: { user: FirebaseUser | null }) => {
     return () => {
       window.removeEventListener('ask-linky', handleAskLinky);
       window.removeEventListener('click', unlockAudio);
-      if (synthesisRef.current) {
-        synthesisRef.current.removeEventListener('voiceschanged', loadVoices);
-      }
     };
   }, []);
 
