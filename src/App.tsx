@@ -119,25 +119,39 @@ const speak = (text: string) => {
   });
 };
 
-const getApiKey = (type: 'gemini' | 'openai' = 'gemini'): string => {
-  // Resilience: Check multiple possible locations for the key
-  let key = "";
+const getAllAvailableKeys = (type: 'gemini' | 'openai'): string[] => {
+  const keys: string[] = [];
+  const env = typeof process !== 'undefined' ? process.env : {} as any;
+  
   if (type === 'gemini') {
-    key = (import.meta as any).env?.VITE_GEMINI_API_KEY || 
-          (typeof process !== 'undefined' ? (process.env?.GEMINI_API_KEY || (process.env as any)?.VITE_GEMINI_API_KEY) : "");
+    const k1 = env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    const k2 = env.GEMINI_API_KEY_2 || (import.meta as any).env?.VITE_GEMINI_API_KEY_2;
+    const k3 = env.GEMINI_API_KEY_3 || (import.meta as any).env?.VITE_GEMINI_API_KEY_3;
+    if (k1 && k1 !== 'undefined') keys.push(k1.trim());
+    if (k2 && k2 !== 'undefined') keys.push(k2.trim());
+    if (k3 && k3 !== 'undefined') keys.push(k3.trim());
   } else {
-    key = (import.meta as any).env?.VITE_OPENAI_API_KEY || 
-          (typeof process !== 'undefined' ? (process.env?.OPENAI_API_KEY || (process.env as any)?.VITE_OPENAI_API_KEY) : "");
+    const k1 = env.OPENAI_API_KEY || (import.meta as any).env?.VITE_OPENAI_API_KEY;
+    const k2 = env.OPENAI_API_KEY_2 || (import.meta as any).env?.VITE_OPENAI_API_KEY_2;
+    const k3 = env.OPENAI_API_KEY_3 || (import.meta as any).env?.VITE_OPENAI_API_KEY_3;
+    if (k1 && k1 !== 'undefined') keys.push(k1.trim());
+    if (k2 && k2 !== 'undefined') keys.push(k2.trim());
+    if (k3 && k3 !== 'undefined') keys.push(k3.trim());
   }
   
-  return (key && key !== 'undefined') ? key.trim() : "";
+  return keys.filter(k => k.length > 5); // Simple validation
+};
+
+const getApiKey = (type: 'gemini' | 'openai' = 'gemini'): string => {
+  const all = getAllAvailableKeys(type);
+  return all[0] || "";
 };
 
 // --- OpenAI Integration ---
 import OpenAI from "openai";
 
-const getOpenAIResponse = async (userPrompt: string, systemContext: string) => {
-  const apiKey = getApiKey('openai');
+const getOpenAIResponse = async (userPrompt: string, systemContext: string, specificKey?: string) => {
+  const apiKey = specificKey || getApiKey('openai');
   if (!apiKey) throw new Error("OPENAI_API_KEY_MISSING");
 
   try {
@@ -164,13 +178,14 @@ const getOpenAIResponse = async (userPrompt: string, systemContext: string) => {
 // -------------------------
 
 const getLinkyAIResponse = async (userPrompt: string, systemContext: string) => {
-  const geminiApiKey = getApiKey('gemini');
-  const openaiApiKey = getApiKey('openai');
+  const geminiKeys = getAllAvailableKeys('gemini');
+  const openaiKeys = getAllAvailableKeys('openai');
 
-  // 1. Thử dùng Gemini trước (Ưu tiên vì tiết kiệm và tích hợp tốt)
-  if (geminiApiKey) {
+  // 1. Thử danh sách Gemini theo thứ tự
+  for (let i = 0; i < geminiKeys.length; i++) {
+    const currentKey = geminiKeys[i];
     try {
-      const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+      const ai = new GoogleGenAI({ apiKey: currentKey });
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview", 
         config: {
@@ -179,37 +194,40 @@ const getLinkyAIResponse = async (userPrompt: string, systemContext: string) => 
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }]
       });
       const aiText = response.text || "Linky chưa nghĩ ra câu trả lời.";
+      // Cleanup for speech
       const speechText = aiText.replace(/[*#$]/g, '').replace(/\[.*?\]/g, ''); 
       speak(speechText);
-      return aiText;
+      return aiText + (i > 0 ? ` (Dự phòng ${i})` : "");
     } catch (error: any) {
-      console.warn("Gemini gặp lỗi, đang thử chuyển sang ChatGPT dự phòng...", error);
-      if (!openaiApiKey) {
+      console.warn(`Gemini Key ${i + 1} gặp lỗi, đang thử Key tiếp theo...`, error);
+      // Nếu là lỗi Quota/Key không hợp lệ, tiếp tục Loop
+      // Nếu là Key cuối cùng của Gemini, mới chuyển sang OpenAI
+      if (i === geminiKeys.length - 1 && openaiKeys.length === 0) {
         if (error.message?.includes("API key not valid")) {
-          return "Lỗi: API Key Gemini không hợp lệ. Vui lòng kiểm tra lại cấu hình.";
+          return "Lỗi: Tất cả API Key Gemini đều không hợp lệ. Vui lòng kiểm tra lại cấu hình.";
         }
         throw error;
       }
     }
   }
 
-  // 2. Thử dùng OpenAI làm Backup
-  if (openaiApiKey) {
+  // 2. Thử danh sách OpenAI nếu Gemini thất bại hoặc không có Key
+  for (let i = 0; i < openaiKeys.length; i++) {
+    const currentKey = openaiKeys[i];
     try {
-      const aiText = await getOpenAIResponse(userPrompt, systemContext);
+      // Chúng ta cần truyền key vào getOpenAIResponse (cần sửa hàm này)
+      const aiText = await getOpenAIResponse(userPrompt, systemContext, currentKey);
       const speechText = aiText.replace(/[*#$]/g, '').replace(/\[.*?\]/g, ''); 
       speak(speechText);
-      return aiText + " (Hỗ trợ từ ChatGPT)";
+      return aiText + ` (ChatGPT Backup ${i + 1})`;
     } catch (error: any) {
-      console.error("Cả 2 dịch vụ AI đều thất bại.", error);
-      throw error;
+      console.error(`OpenAI Key ${i + 1} thất bại.`, error);
+      if (i === openaiKeys.length - 1) throw error;
     }
   }
 
-  return "⚠️ Linky AI chưa được thiết lập khóa (API Key). " +
-         "\n\n- Nếu bạn đang dùng AI Studio: Vào menu 'Settings' -> chọn 'API Keys' để thêm." +
-         "\n\n- Nếu bạn đưa lên GitHub: Hãy thêm Secret tên là VITE_GEMINI_API_KEY hoặc VITE_OPENAI_API_KEY." +
-         "\n\nHãy nhờ người hỗ trợ kỹ thuật kiểm tra nếu bạn không rõ phần này nhé!";
+  return "⚠️ Linky AI chưa được thiết lập bất kỳ khóa (API Key) nào. " +
+         "\n\nHãy thêm VITE_GEMINI_API_KEY hoặc VITE_OPENAI_API_KEY (có thể thêm _2, _3 để dự phòng) nhé!";
 };
 
 (window as any).getLinkyAIResponse = getLinkyAIResponse;
