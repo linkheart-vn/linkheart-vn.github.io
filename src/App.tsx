@@ -165,8 +165,8 @@ const getLinkyAIResponse = async (userPrompt: string, systemContext: string) => 
     const currentKey = geminiKeys[i];
     try {
       const ai = new GoogleGenAI({ apiKey: currentKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview", 
+      const response = await (ai as any).models.generateContent({
+        model: "gemini-1.5-flash", 
         config: {
           systemInstruction: systemContext + "\n\nAn toàn: Luôn tích cực, ấm áp. Không thảo luận chủ đề gây hại.",
         },
@@ -398,7 +398,7 @@ const LinkyAI = ({ user }: { user: FirebaseUser | null }) => {
   const [isListening, setIsListening] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const synthesisRef = useRef<SpeechSynthesis | null>(window.speechSynthesis);
+  const synthesisRef = useRef<SpeechSynthesis | null>(typeof window !== 'undefined' ? window.speechSynthesis : null);
   const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
 
   // Asynchronous voice loading and initialization
